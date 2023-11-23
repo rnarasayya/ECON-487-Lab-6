@@ -1,0 +1,90 @@
+---
+title: "ECON 487 PS 6"
+author: "Rohan Narasayya"
+date: "2023-11-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+library(ggplot2)
+library(stringr)
+library(dplyr)
+library(randomForest)
+```
+
+```{r}
+oj <- read.csv("oj.csv")
+oj <- oj %>% 
+  mutate(q = exp(logmove)) %>% 
+  group_by(store, week) %>% 
+  mutate(weighted_mean = weighted.mean(price, q)) %>% 
+  ungroup()
+head(oj)
+
+oj$price <- log(oj$price)
+#create ID column
+oj$id <- 1:nrow(oj)
+set.seed(1)
+#use 80% of dataset as training set and 20% as hold out set 
+train <- oj %>% dplyr::sample_frac(0.80)
+test  <- dplyr::anti_join(oj, train, by = 'id')
+oj.rf <- randomForest(logmove ~ price + weighted_mean + brand + feat + AGE60 +  EDUC  + ETHNIC + INCOME + HHLARGE + WORKWOM + HVAL150 + SSTRDIST + SSTRVOL + CPDIST5 + CPWVOL5 + brand:price + feat:price + AGE60:price +  EDUC:price  + ETHNIC:price + INCOME:price + HHLARGE:price + WORKWOM:price + HVAL150:price + SSTRDIST:price + SSTRVOL:price + CPDIST5:price + CPWVOL5:price, data = train, ntree = 	100, keep.forest = TRUE) 
+predictions = predict(oj.rf, newdata = test) 
+resid2 <- (test$logmove - predictions)^2
+df <- data.frame(predictions, test$logmove)
+head(df)
+```
+
+```{r}
+ggplot(df,
+       aes(x = test.logmove,
+           y = predictions)) +
+  geom_point()
+```
+
+```{r}
+mse_rf <- mean(resid2)
+mse_rf
+```
+
+The Lasso mse is .36 whereas the mse for this random forest is .26, which is clearly lower, indicating that the random forest does a better job a predicting.
+
+```{r}
+library(xgboost)
+
+#create ID column
+oj$id <- 1:nrow(oj)
+
+#use 80% of dataset as training set and 20% as hold out set 
+train <- oj %>% dplyr::sample_frac(0.80)
+test  <- dplyr::anti_join(oj, train, by = 'id')
+head(oj)
+
+train_matrix <- xgb.DMatrix(data = model.matrix(logmove ~ price + weighted_mean + brand + feat + AGE60 +  EDUC  + ETHNIC + INCOME + HHLARGE + WORKWOM + HVAL150 + SSTRDIST + SSTRVOL + CPDIST5 + CPWVOL5 + brand:price + feat:price + AGE60:price +  EDUC:price  + ETHNIC:price + INCOME:price + HHLARGE:price + WORKWOM:price + HVAL150:price + SSTRDIST:price + SSTRVOL:price + CPDIST5:price + CPWVOL5:price, data = train), label = train$logmove)
+
+test_matrix <- xgb.DMatrix(data = model.matrix(logmove ~ price + weighted_mean + brand + feat + AGE60 +  EDUC  + ETHNIC + INCOME + HHLARGE + WORKWOM + HVAL150 + SSTRDIST + SSTRVOL + CPDIST5 + CPWVOL5 + brand:price + feat:price + AGE60:price +  EDUC:price  + ETHNIC:price + INCOME:price + HHLARGE:price + WORKWOM:price + HVAL150:price + SSTRDIST:price + SSTRVOL:price + CPDIST5:price + CPWVOL5:price, data = test), label = test$logmove)
+
+# Will do 5 fold cross validation with nrounds set to default 100 so we can find best number of rounds.
+cv <- xgb.cv(data = train_matrix, nfold = 5, nrounds = 100, early_stopping_rounds = 10)
+```
+
+The best test-rmse is 0.477807+0.006799 and the corresponding train-rmse is 0.393059+0.002929. This means the best test MSE is roughly .23 and the train MSE is roughly .15. This is the lowest error of all the models so far, it is even better than the random forest.
+
+```{r}
+best_cv <- xgb.train(data = train_matrix, nrounds = 57)
+predictions = predict(best_cv, test_matrix)
+mse <- mean((predictions - test$logmove)^2)
+mse
+```
+
+The mse is .22, which is almost the same as it cross validation mse of .23. This is the best of all the models we have used so far. It is even lower than the .26 of Random Forest.
